@@ -67,17 +67,34 @@ void strbuf_grow(struct strbuf *sb, size_t extra){
         sb->alloc = sb->len + extra;
         char* sd = (char*)realloc(sb->buf,(sb->alloc + 1)*sizeof(char));
         if(sd == NULL)
-        exit(0);
+        return;
         sb->buf = sd;
+        sb->buf[sb->len] = '\0';
     }
-    return;
+    //return;
 }
 // 向 sb 追加长度为 len 的数据 data。
 void strbuf_add(struct strbuf *sb, const void *data, size_t len){
-    strbuf_grow(sb,len);
-    strncat(sb->buf, (char*)data, len);
-    sb->alloc = sb->alloc + len;
+    // if(data == NULL)
+    // return;
+    // strbuf_grow(sb,len);
+    // memcpy(sb->buf + sb->len, data, len);
+    // sb->len = sb->len + len;
+    // sb->buf[sb->len] = '\0';
+    if(data == NULL)
+    return;
+    if(sb->alloc < sb->len + len + 1)
+    {
+        sb->alloc = sb->len + len + 1;
+        char* sd = (char*)realloc(sb->buf,(char)sb->alloc*sizeof(char));
+        if(sd == NULL)
+        return;
+        sb->buf = sd;
+        sb->buf[sb->len] = '\0';
+    }
+    memcpy(sb->buf + sb->len,data,len);
     sb->len = sb->len + len;
+    sb->buf[sb->len] = '\0';
 }
 // 向 sb 追加一个字符 c。
 void strbuf_addch(struct strbuf *sb, int c){
@@ -85,7 +102,7 @@ void strbuf_addch(struct strbuf *sb, int c){
     sb->buf[sb->len] = 'c';
     sb->buf[sb->len+1] = '\0';
     sb->len = sb->len + 1;
-    sb->alloc = sb->alloc + 1;
+    //sb->alloc = sb->alloc + 1;
 }
 // 向 sb 追加一个字符串 s。
 void strbuf_addstr(struct strbuf *sb, const char *s){
@@ -204,8 +221,13 @@ ssize_t strbuf_read(struct strbuf *sb, int fd, size_t hint){
 }
 // 将文件句柄为 fp 的一行内容（抛弃换行符）读取到 sb。
 int strbuf_getline(struct strbuf *sb, FILE *fp){
-    
-    return;
+    size_t max = 1024;
+    if(fgets(sb->buf,max,fp) == NULL)
+    return -1;
+    size_t sz = strlen(sb->buf);
+    if(sz > 0 && sb->buf[sz-1] == '\n')
+    sb->buf[sz-1] = '\0';
+    return 0;
 }
 //实现字符串切割（C 系字符串函数的一个痛点）。
 // /**
@@ -220,7 +242,91 @@ int strbuf_getline(struct strbuf *sb, FILE *fp){
 // * @note 函数将字符串 str 根据切割字符 terminator 切割成多个 strbuf，并返回结果。可选参数 max 用于限定最大切割数量。
 // */
 struct strbuf **strbuf_split_buf(const char *str, size_t len, int terminator, int max){
-    return;
+    if(len == 0 || str == NULL)
+    return NULL;
+    struct strbuf **result = (strbuf**)malloc((max+1) * sizeof(struct strbuf*));
+    int count = 0;
+    size_t start = 0;
+    if(result == NULL)
+    {
+        free(result);
+        return NULL;
+    }
+    for(size_t i = 0; i < len; i++)
+    {
+        if(str[i] == terminator || (count == max - 1 && max > 0))
+        {
+            struct strbuf *Buf = (strbuf*)malloc(sizeof(struct strbuf));
+            if(Buf == NULL)
+            {
+                for(size_t j = 0; j < count; j++)
+                {
+                    free(result[j]->buf);
+                    free(result[j]);
+                }
+                free(result);
+                return NULL;
+            }
+            Buf->len = i - start;
+            Buf->buf = (char*)malloc((Buf->len+1) * sizeof(char*));
+            if(Buf->buf == NULL)
+            {
+                free(Buf);
+                {
+                    for(size_t j = 0; j < count; j++)
+                    {
+                        free(result[j]->buf);
+                        free(result[j]);
+                    }
+                    free(result);
+                    return NULL;
+                }
+            }
+            memcpy(Buf->buf,str+start,Buf->len);
+            Buf->buf[Buf->len] = '\0';
+            result[count] = Buf;
+            start = i + 1;
+            count++;
+            if(count == max && max > 0)
+            {
+                start = i + 1;
+                break;
+            }
+        }
+    }
+    if(start < len)
+    {
+        struct strbuf *Buf = (strbuf*)malloc(sizeof(struct strbuf));
+        if(Buf == NULL)
+        {
+            for(size_t j = 0; j < count; j++)
+            {
+                free(result[j]->buf);
+                free(result[j]);
+            }
+            free(result);
+            return NULL;
+        }
+        Buf->len = len - start;
+        Buf->buf = (char*)malloc((Buf->len+1)*sizeof(char*));
+        if(Buf->buf == NULL)
+        {
+            free(Buf);
+            for(size_t j = 0; j < count; j++)
+            {
+                free(result[j]->buf);
+                free(result[j]);
+            }
+            free(result);
+            return NULL;
+        }
+        memcpy(Buf->buf,str+start,Buf->len);
+        Buf->buf[Buf->len] = '\0';
+        result[count] = Buf;
+        count++;
+    }
+    result[count] = NULL;
+    return result;
 }
 //实现判断一个 strbuf 是否以指定字符串开头的功能（C 系字符串函数的另一个痛点）。
 // /**
@@ -228,11 +334,24 @@ struct strbuf **strbuf_split_buf(const char *str, size_t len, int terminator, in
 // *
 // * @param target_str 目标字符串
 // * @param str 前缀字符串
-// * @param strlen target_str 的长度
+// * @param strnlen target_str 的长度
 // * @return bool 前缀相同返回 true，否则返回 false
 // */
 bool strbuf_begin_judge(char *target_str, const char *str, int strnlen){
-    return;
+    if(str == NULL || target_str == NULL)
+    return false;
+    size_t sz = strlen(str);
+    size_t n = 0;
+    if(sz > strnlen)
+    return false;
+    for(int i = 0; i < sz; i++)
+    {
+        if(target_str[i] != str[i])
+        return false;
+        n++;
+    }
+    if(n == sz)
+    return true;
 }
 //获取字符串从坐标 [begin, end) 的所有内容（可以分成引用和拷贝两个模式） 。
 // /**
@@ -247,5 +366,5 @@ bool strbuf_begin_judge(char *target_str, const char *str, int strnlen){
 // * @note 下标从0开始，[begin, end)表示左闭右开区间
 // */
 char *strbuf_get_mid_buf(char *target_buf, int begin, int end, int len){
-    return;
+    return 0;
 }
